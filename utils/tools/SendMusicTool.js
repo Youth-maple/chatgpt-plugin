@@ -27,7 +27,7 @@ export class SendMusicTool extends AbstractTool {
 
     try {
       let group = await e.bot.pickGroup(target)
-      await group.shareMusic('163', id)
+      await group.shareMusic('qq', id)
       return `the music has been shared to ${target}`
     } catch (e) {
       return `music share failed: ${e}`

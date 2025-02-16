@@ -59,6 +59,8 @@ const newFetch = (url, options = {}) => {
 
   return fetch(url, mergedOptions)
 }
+// 添加一个延迟函数
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 export class chatgpt extends plugin {
   constructor (e) {
@@ -74,43 +76,43 @@ export class chatgpt extends plugin {
       rule: [
         {
           /** 命令正则匹配 */
-          reg: '^#(图片)?chat3[sS]*',
+          reg: '^#chat3[sS]*',
           /** 执行方法 */
           fnc: 'chatgpt3'
         },
         {
           /** 命令正则匹配 */
-          reg: '^#(图片)?chat1[sS]*',
+          reg: '^#chat1[sS]*',
           /** 执行方法 */
           fnc: 'chatgpt1'
         },
         {
           /** 命令正则匹配 */
-          reg: '^#(图片)?chatglm[sS]*',
+          reg: '^#chatglm[sS]*',
           /** 执行方法 */
           fnc: 'chatglm'
         },
         {
           /** 命令正则匹配 */
-          reg: '^#(图片)?bing[sS]*',
+          reg: '^#bing[sS]*',
           /** 执行方法 */
           fnc: 'bing'
         },
         {
           /** 命令正则匹配 */
-          reg: '^#(图片)?claude(2|3|.ai)[sS]*',
+          reg: '^#claude(2|3|.ai)[sS]*',
           /** 执行方法 */
           fnc: 'claude2'
         },
         {
           /** 命令正则匹配 */
-          reg: '^#(图片)?claude[sS]*',
+          reg: '^#claude[sS]*',
           /** 执行方法 */
           fnc: 'claude'
         },
         {
           /** 命令正则匹配 */
-          reg: '^#(图片)?xh[sS]*',
+          reg: '^#xh[sS]*',
           /** 执行方法 */
           fnc: 'xh'
         },
@@ -124,25 +126,25 @@ export class chatgpt extends plugin {
         },
         {
           /** 命令正则匹配 */
-          reg: '^#(图片)?glm4[sS]*',
+          reg: '^#glm4[sS]*',
           /** 执行方法 */
           fnc: 'glm4'
         },
         {
           /** 命令正则匹配 */
-          reg: '^#(图片)?qwen[sS]*',
+          reg: '^#qwen[sS]*',
           /** 执行方法 */
           fnc: 'qwen'
         },
         {
           /** 命令正则匹配 */
-          reg: '^#(图片)?gemini[sS]*',
+          reg: '^#gemini[sS]*',
           /** 执行方法 */
           fnc: 'gemini'
         },
         {
           /** 命令正则匹配 */
-          reg: toggleMode === 'at' ? '^[^#][sS]*' : '^#(图片)?chat[^gpt][sS]*',
+          reg: toggleMode === 'at' ? '^[^#][sS]*' : '^#chat[^gpt][sS]*',
           /** 执行方法 */
           fnc: 'chatgpt',
           log: false
@@ -208,7 +210,7 @@ export class chatgpt extends plugin {
     this.toggleMode = toggleMode
     this.reply = async (msg, quote, data) => {
       if (!Config.enableMd) {
-        return e.reply(msg, quote, data)
+        return e.reply(msg, false, data)
       }
       let handler = e.runtime?.handler || {}
       const btns = await handler.call('chatgpt.button.post', this.e, data)
@@ -483,7 +485,6 @@ export class chatgpt extends plugin {
   async chatgpt (e) {
     let msg = e.msg
     let prompt
-    let forcePictureMode = false
     if (this.toggleMode === 'at') {
       if (!msg || e.msg?.startsWith('#')) {
         return false
@@ -534,10 +535,7 @@ export class chatgpt extends plugin {
         }
         return false
       }
-      if (e.msg.trimStart().startsWith('#图片chat')) {
-        forcePictureMode = true
-      }
-      prompt = _.replace(e.msg.trimStart(), /#(图片)?chat/, '').trim()
+      prompt = _.replace(e.msg.trimStart(), '#chat', '').trim()
       if (prompt.length === 0) {
         return false
       }
@@ -552,10 +550,10 @@ export class chatgpt extends plugin {
     const use = (userData.mode === 'default' ? null : userData.mode) || await redis.get('CHATGPT:USE') || 'api'
     // 自动化插件本月已发送xx条消息更新太快，由于延迟和缓存问题导致不同客户端不一样，at文本和获取的card不一致。因此单独处理一下
     prompt = prompt.replace(/^｜本月已发送\d+条消息/, '')
-    await this.abstractChat(e, prompt, use, forcePictureMode)
+    await this.abstractChat(e, prompt, use)
   }
 
-  async abstractChat (e, prompt, use, forcePictureMode = false) {
+  async abstractChat (e, prompt, use) {
     // 关闭私聊通道后不回复
     if (!e.isMaster && e.isPrivate && !Config.enablePrivateChat) {
       return false
@@ -623,6 +621,9 @@ export class chatgpt extends plugin {
     if (confirmOn) {
       await this.reply('我正在思考如何回复你，请稍等', true, { recallMsg: 8 })
     }
+
+    prompt = `请在你的回复中使用 "[+]" 作为分段标记。每个段落应该非常短，基本上就是一句话。在每句话后插入这个标记来分割你的回复。\n\n${prompt}`
+
     const emotionFlag = await redis.get(`CHATGPT:WRONG_EMOTION:${e.sender.user_id}`)
     let userReplySetting = await getUserReplySetting(this.e)
     // 图片模式就不管了，降低抱歉概率
@@ -794,7 +795,7 @@ export class chatgpt extends plugin {
           if (lyrics !== '') {
             sunoList.push(
               {
-                json: { option: 'Suno', tags: client.generateRandomStyle(), title: `${e.sender.nickname}之歌`, lyrics },
+                json: { option: 'Suno', tags: client.generateRandomStyle(), title: `${e.sender.nickname}之歌`, lyrics: lyrics },
                 markdown: null,
                 origin: lyrics
               }
@@ -823,23 +824,35 @@ export class chatgpt extends plugin {
         }
       }
       let response = chatMessage?.text?.replace('\n\n\n', '\n')
-      let thinking = chatMessage.thinking_text
-      if (handler.has('chatgpt.response.post')) {
-        logger.debug('调用后处理器: chatgpt.response.post')
-        handler.call('chatgpt.response.post', this.e, {
-          content: response,
-          thinking,
-          use,
-          prompt
-        }, true).catch(err => {
-          logger.error('后处理器出错', err)
-        })
-      }
       let mood = 'blandness'
       if (!response) {
         await this.reply('没有任何回复', true)
         return
       }
+    // 检查是否使用了分隔符
+    if (response.includes('[+]')) {
+      logger.info('AI使用了指定的分隔符');
+      // 使用分隔符分割响应
+      let chunks = response.split('[+]');
+
+      // 发送每个chunk，除了最后一个
+      for (let i = 0; i < chunks.length - 1; i++) {
+        let chunk = chunks[i].trim();
+        if (chunk) {
+          try {
+            await this.reply(chunk, e.isGroup);
+            await delay(1000); // 每条消息之间等待1秒
+          } catch (error) {
+            logger.error(`发送消息错误: ${error.message}`);
+          }
+        }
+      }
+    } else {
+      logger.info('AI没有使用指定的分隔符，使用后备方案');
+      // 如果没有使用分隔符，使用后备方案
+      await this.sendSplitMessage(response, e.isGroup);
+    }
+
       let emotion, emotionDegree
       if (Config.ttsMode === 'azure' && (use === 'claude' || use === 'bing') && await AzureTTS.getEmotionPrompt(e)) {
         let ttsRoleAzure = userReplySetting.ttsRoleAzure
@@ -983,7 +996,7 @@ export class chatgpt extends plugin {
               prompt
             })
           }
-          await this.reply(responseText, e.isGroup)
+          //await this.reply(responseText, e.isGroup)
           if (quotemessage.length > 0) {
             this.reply(await makeForwardMsg(this.e, quotemessage.map(msg => `${msg.text} - ${msg.url}`)))
           }
@@ -997,7 +1010,7 @@ export class chatgpt extends plugin {
         } else {
           await this.reply('合成语音发生错误~')
         }
-      } else if (forcePictureMode || userSetting.usePicture || (Config.autoUsePicture && response.length > Config.autoUsePictureThreshold)) {
+      } else if (userSetting.usePicture || (!Config.enableMd && Config.autoUsePicture && response.length > Config.autoUsePictureThreshold)) {
         try {
           await this.renderImage(e, use, response, prompt, quotemessage, mood, chatMessage.suggestedResponses, imgUrls)
         } catch (err) {
@@ -1037,22 +1050,19 @@ export class chatgpt extends plugin {
             logger.debug('生成建议回复失败', err)
           }
         }
-        this.reply(responseText, e.isGroup, {
-          btnData: {
-            use,
-            suggested: chatMessage.suggestedResponses
-          }
-        })
-        if (thinking) {
-          let thinkingForward = await common.makeForwardMsg(e, [thinking], '思考过程')
-          this.reply(thinkingForward)
-        }
+        //this.reply(responseText, e.isGroup, {
+          //btnData: {
+            //use,
+            //suggested: chatMessage.suggestedResponses
+          //}
+        //})
         if (Config.enableSuggestedResponses && chatMessage.suggestedResponses) {
           this.reply(`建议的回复：\n${chatMessage.suggestedResponses}`)
         }
       }
     } catch (err) {
-      logger.error(err)
+      logger.error(`ChatGPT回复出错: ${err.message}`)
+        await this.reply(`出现错误：${err.message}`, true, { recallMsg: e.isGroup ? 10 : 0 })
       if (use === 'api3') {
         // 异常了也要腾地方（todo 大概率后面的也会异常，要不要一口气全杀了）
         await redis.lPop('CHATGPT:CHAT_QUEUE', 0)
@@ -1071,12 +1081,31 @@ export class chatgpt extends plugin {
     }
   }
 
+// 修改后的后备方案方法
+async sendSplitMessage(text, isGroup) {
+  // 使用正则表达式将文本分割成句子
+  const sentences = text.replace(/([.!?。！？])\s*/g, "$1[+]").split('[+]');
+
+  // 发送除了最后一个之外的所有句子
+  for (let i = 0; i < sentences.length - 1; i++) {
+    let sentence = sentences[i].trim();
+    if (sentence) {
+      try {
+        await this.reply(sentence, isGroup);
+        await delay(1000); // 每条消息之间等待1秒
+      } catch (error) {
+        logger.error(`发送消息错误: ${error.message}`);
+      }
+    }
+  }
+}
+
   async chatgpt1 (e) {
-    return await this.otherMode(e, 'api', /#(图片)?chat1/)
+    return await this.otherMode(e, 'api', '#chat1')
   }
 
   async chatgpt3 (e) {
-    return await this.otherMode(e, 'api3', /#(图片)?chat3/)
+    return await this.otherMode(e, 'api3', '#chat3')
   }
 
   async chatglm (e) {
@@ -1084,31 +1113,31 @@ export class chatgpt extends plugin {
   }
 
   async bing (e) {
-    return await this.otherMode(e, 'bing', /#(图片)?bing/)
+    return await this.otherMode(e, 'bing')
   }
 
   async claude2 (e) {
-    return await this.otherMode(e, 'claude2', /^#(图片)?claude(2|3|.ai)/)
+    return await this.otherMode(e, 'claude2', /^#claude(2|3|.ai)/)
   }
 
   async claude (e) {
-    return await this.otherMode(e, 'claude', /#(图片)?claude/)
+    return await this.otherMode(e, 'claude')
   }
 
   async qwen (e) {
-    return await this.otherMode(e, 'qwen', /#(图片)?qwen/)
+    return await this.otherMode(e, 'qwen')
   }
 
   async glm4 (e) {
-    return await this.otherMode(e, 'chatglm4', /#(图片)?glm4/)
+    return await this.otherMode(e, 'chatglm4', '#glm4')
   }
 
   async gemini (e) {
-    return await this.otherMode(e, 'gemini', /#(图片)?gemini/)
+    return await this.otherMode(e, 'gemini')
   }
 
   async xh (e) {
-    return await this.otherMode(e, 'xh', /#(图片)?xh/)
+    return await this.otherMode(e, 'xh')
   }
 
   async cacheContent (e, use, content, prompt, quote = [], mood = '', suggest = '', imgUrls = []) {
@@ -1416,8 +1445,7 @@ export class chatgpt extends plugin {
     if (prompt.length === 0) {
       return false
     }
-    let forcePictureMode = e.msg.trimStart().startsWith('#图片')
-    await this.abstractChat(e, prompt, mode, forcePictureMode)
+    await this.abstractChat(e, prompt, mode)
     return true
   }
 }
